@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Insert title here</title>
+    <script src="../js/jquery-3.3.1.min.js" type="text/javascript"></script>
+    <script src="../js/echarts.js" type="text/javascript"></script>
+</head>
+<body>
+<div id="kl" style="width:100%;height:600px"></div>
+<script type="text/javascript">
+    // 基于准备好的dom，初始化echarts实例
+    var myChart = echarts.init(document.getElementById('kl'));
+    var x = new Array(); //x轴时间
+    var y = new Array(); //y轴刻度
+    var datas = new Array(); //基础数据
+    var price = new Array(); //k线数据
+    var sec_sep = 2000; //请求间隔
+    var min15_mills = 900000;//15分钟的毫秒数（暂定15分钟一个K线）
+    var dv = min15_mills/sec_sep;//15分钟中包含K线的个数
+
+    var day1_mills = 86400000;
+    var tmin = 9999;
+    var tmax = 0;
+    initXY();
+    initData();
+    // 指定图表的配置项和数据
+    option = {
+        title: {
+            zlevel: 1,
+            text: 'XXXX指数',
+            subtext: '开盘:'+datas[0]+' 当前 :'+datas[datas.length-1]+' 最高:'+tmax+' 最低:'+tmin,
+            x: 'center',
+            y: 'top'
+        },
+        tooltip : {
+            trigger: 'axis',
+            formatter: function (params) {
+                var res = params[0].seriesName + ' ' + params[0].name;
+                res += '<br/>  开盘 : ' + params[0].value[1];
+                res += '<br/>  收盘 : ' + params[0].value[2];
+                res += '<br/>  最高 : ' + params[0].value[4];
+                res += '<br/>  最低 : ' + params[0].value[3];
+                return res;
+            }
+        },
+        xAxis: {
+            data: x,
+            type: 'category',
+            boundaryGap: false,
+            axisLabel:{
+                interval:2,
+            }
+        },
+        yAxis: {
+            min:(tmin-20),
+            max:(tmax+20),
+            position:'right',
+            type: 'value'
+        },
+        series: [{
+            name: 'XXXX指数',
+            type: 'k',
+            data: price,
+            itemStyle: {
+                normal: {
+                    color: '#314656', // 阳线填充颜色
+                    color0: '#C23531', // 阴线填充颜色
+                    borderColor: '#314656', // 阳线填充颜色
+                    borderColor0: '#C23531' // 阴线填充颜色
+                }
+            }
+        }]
+    };
+    // 使用刚指定的配置项和数据显示图表。
+    myChart.setOption(option);
+
+
+    function getTimeText(date){
+        var h = date.getHours();
+        var m = date.getMinutes();
+        h = (h < 10) ? '0'+h : h;
+        m = (m < 10) ? '0'+m : m;
+        var txt = h+":"+m;
+        return txt;
+    }
+    //初始化数据
+    function initXY(){
+        //x轴刻度
+        var now = new Date();
+        //开盘时间，早间7时
+        var today_begin = new Date();
+        today_begin.setHours(7);
+        today_begin.setMinutes(0);
+        today_begin.setSeconds(0);
+        var now_mills = now.getTime();
+        var begin_mills = today_begin.getTime();
+        //当前时间与开盘时间的间隔
+        var sep = (now_mills - begin_mills > 0) ? (now_mills - begin_mills) : (now_mills - begin_mills + day1_mills);
+
+        //当前时间与开盘时间之间的K线个数
+        var count = Math.ceil(sep / min15_mills);
+        //临时变量
+        var temp = new Date();
+        for(var i = 0; i <= count; i++){
+            var mills = begin_mills + min15_mills*i;
+            temp.setTime(mills);
+            x.push(getTimeText(temp));
+        }
+    }
+
+    //初始化数据
+    function initData(){
+        //请求基础数据
+        $.ajax({
+            url: 'getAllData',
+            type: 'POST',
+            async: false,
+            success: function (json){
+                datas = json;
+                var count = Math.ceil(json.length / dv);
+                var s = 0;
+                var e = (count > 1) ? dv : json.length;
+                for(var i = 0; i < count; i++){
+                    e = (i == count-1) ? (json.length - 1) : e;
+                    var t = new Array();
+                    var max = json[s];
+                    var min = json[s];
+                    var start = json[s];
+                    var end = json[e];
+                    for(var j = s; j < e; j++){
+                        if(json[j] > max){
+                            max = json[j];
+                        }
+                        if(datas[j] < min){
+                            min = json[j];
+                        }
+                    }
+                    if(min < tmin){
+                        tmin = min;
+                    }
+                    if(max > tmax){
+                        tmax = max;
+                    }
+                    t.push(start); //开盘价 t[0]
+                    t.push(end);  //收盘价 t[1]
+                    t.push(min);  //最低价 t[2]
+                    t.push(max);  //最高价 t[3]
+                    price.push(t);
+                    s += dv;
+                    e += dv;
+                }
+            }
+        });
+
+    }
+
+    //刷新数据
+
+    function refreshData(){
+        //获取最新数据
+        $.ajax({
+            url: 'getNowData',
+            type: 'POST',
+            success: function (json){
+                if(json > 0){
+                    datas.push(json);
+                    if(datas.length % dv == 0){
+                        var t = new Array(json,json,json,json);
+                        price.push(t);
+                    }else{
+                        var t = price[price.length - 1];
+                        t[1] = json; //收盘价
+                        if(json < t[2]){ //最低价
+                            t[2] = json;
+                        }
+                        if(json > t[3]){//最高价
+                            t[3] = json;
+                        }
+                    }
+                }
+            }
+        });
+        // 重新绘制
+        // 指定图表的配置项和数据
+        option = {
+            title: {
+                subtext: '开盘:'+datas[0]+' 当前 :'+datas[datas.length-1]+' 最高:'+tmax+' 最低:'+tmin,
+            },
+            yAxis: {
+                min:(tmin-20),
+                max:(tmax+20)
+            },
+            series: [{
+                data: price
+            }]
+        };
+        // 使用刚指定的配置项和数据显示图表。
+        myChart.setOption(option);
+    }
+
+    setInterval(refreshData,sec_sep);
+</script>
+</body>
+</html>
